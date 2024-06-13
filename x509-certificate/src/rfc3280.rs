@@ -324,11 +324,11 @@ impl DirectoryString {
     }
 }
 
-impl ToString for DirectoryString {
-    fn to_string(&self) -> String {
+impl std::fmt::Display for DirectoryString {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Self::PrintableString(s) => s.to_string(),
-            Self::Utf8String(s) => s.to_string(),
+            Self::PrintableString(s) => write!(f, "{s}"),
+            Self::Utf8String(s) => write!(f, "{s}"),
             _ => unimplemented!(),
         }
     }

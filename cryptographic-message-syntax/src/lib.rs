@@ -882,7 +882,7 @@ impl TryFrom<&crate::asn1::rfc5652::SignerInfo> for SignerInfo {
 
             let content_type = content_type
                 .values
-                .get(0)
+                .first()
                 .unwrap()
                 .deref()
                 .clone()
@@ -902,7 +902,7 @@ impl TryFrom<&crate::asn1::rfc5652::SignerInfo> for SignerInfo {
 
             let message_digest = message_digest
                 .values
-                .get(0)
+                .first()
                 .unwrap()
                 .deref()
                 .clone()
@@ -921,7 +921,7 @@ impl TryFrom<&crate::asn1::rfc5652::SignerInfo> for SignerInfo {
                     } else {
                         let time = attr
                             .values
-                            .get(0)
+                            .first()
                             .unwrap()
                             .deref()
                             .clone()
@@ -956,7 +956,7 @@ impl TryFrom<&crate::asn1::rfc5652::SignerInfo> for SignerInfo {
                             if attr.values.len() != 1 {
                                 Err(CmsError::MalformedUnsignedAttributeTimeStampToken)
                             } else {
-                                Ok(attr.values.get(0).unwrap().deref().clone().decode(|cons| {
+                                Ok(attr.values.first().unwrap().deref().clone().decode(|cons| {
                                     crate::asn1::rfc5652::SignedData::decode(cons)
                                 })?)
                             }
