@@ -24,7 +24,6 @@ use {
         Captured, Mode, OctetString, Oid,
     },
     bytes::Bytes,
-    reqwest::IntoUrl,
     std::collections::HashSet,
     x509_certificate::{
         asn1time::UtcTime,
@@ -66,7 +65,7 @@ pub struct SignerBuilder<'a> {
     extra_signed_attributes: Vec<Attribute>,
 
     /// Time-Stamp Protocol (TSP) server HTTP URL to use.
-    time_stamp_url: Option<reqwest::Url>,
+    time_stamp_url: Option<url::Url>,
 }
 
 impl<'a> SignerBuilder<'a> {
@@ -164,8 +163,8 @@ impl<'a> SignerBuilder<'a> {
     /// (TSP) as defined by RFC 3161. At signature generation time, the server will be
     /// contacted and the time stamp token response will be added as an unsigned attribute
     /// on the [SignedData] instance.
-    pub fn time_stamp_url(mut self, url: impl IntoUrl) -> Result<Self, reqwest::Error> {
-        self.time_stamp_url = Some(url.into_url()?);
+    pub fn time_stamp_url(mut self, url: &str) -> Result<Self, url::ParseError> {
+        self.time_stamp_url = Some(url::Url::parse(url)?);
         Ok(self)
     }
 }
@@ -293,7 +292,7 @@ impl<'a> SignedDataBuilder<'a> {
     }
 
     /// Construct a `SignedData` object from the parameters received so far.
-    pub async fn build_signed_data(&self) -> Result<SignedData, CmsError> {
+    pub fn build_signed_data(&self) -> Result<SignedData, CmsError> {
         let mut signer_infos = SignerInfos::default();
         let mut seen_digest_algorithms = HashSet::new();
         let mut seen_certificates = self.certificates.clone();
@@ -401,10 +400,10 @@ impl<'a> SignedDataBuilder<'a> {
             if let Some(url) = &signer.time_stamp_url {
                 // The message sent to the TSA (via a digest) is the signature of the signed data.
                 let res = time_stamp_message_http(
-                    url.clone(),
+                    url.as_str(),
                     signature.as_ref(),
                     signer.digest_algorithm,
-                ).await?;
+                )?;
 
                 if !res.is_success() {
                     return Err(TimeStampError::Unsuccessful(res.clone()).into());
@@ -481,8 +480,8 @@ impl<'a> SignedDataBuilder<'a> {
     /// RFC 5652 says `SignedData` is BER encoded. However, DER is a stricter subset
     /// of BER. DER encodings are valid BER. So producing DER encoded data is perfectly
     /// valid. We choose to go with the more well-defined encoding format.
-    pub async fn build_der(&self) -> Result<Vec<u8>, CmsError> {
-        let signed_data = self.build_signed_data().await?;
+    pub fn build_der(&self) -> Result<Vec<u8>, CmsError> {
+        let signed_data = self.build_signed_data()?;
 
         let mut ber = Vec::new();
         signed_data
@@ -503,8 +502,8 @@ mod tests {
 
     const DIGICERT_TIMESTAMP_URL: &str = "http://timestamp.digicert.com";
 
-    #[tokio::test]
-    async fn simple_rsa_signature_inline() {
+    #[test]
+    fn simple_rsa_signature_inline() {
         let key = rsa_private_key();
         let cert = rsa_cert();
 
@@ -514,7 +513,6 @@ mod tests {
             .content_inline(vec![42])
             .signer(signer)
             .build_der()
-            .await
             .unwrap();
 
         let signed_data = crate::SignedData::parse_ber(&ber).unwrap();
@@ -531,8 +529,8 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn simple_rsa_signature_external() {
+    #[test]
+    fn simple_rsa_signature_external() {
         let key = rsa_private_key();
         let cert = rsa_cert();
 
@@ -542,7 +540,6 @@ mod tests {
             .content_external(vec![42])
             .signer(signer)
             .build_der()
-            .await
             .unwrap();
 
         let signed_data = crate::SignedData::parse_ber(&ber).unwrap();
@@ -557,8 +554,8 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn time_stamp_url() {
+    #[test]
+    fn time_stamp_url() {
         let key = rsa_private_key();
         let cert = rsa_cert();
 
@@ -570,7 +567,6 @@ mod tests {
             .content_inline(vec![42])
             .signer(signer)
             .build_der()
-            .await
             .unwrap();
 
         let signed_data = crate::SignedData::parse_ber(&ber).unwrap();
@@ -594,8 +590,8 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn simple_ecdsa_signature() {
+    #[test]
+    fn simple_ecdsa_signature() {
         for curve in EcdsaCurve::all() {
             let (cert, key) = self_signed_ecdsa_key_pair(Some(*curve));
 
@@ -604,7 +600,6 @@ mod tests {
                 .certificate(cert.clone())
                 .signer(SignerBuilder::new(&key, cert))
                 .build_der()
-                .await
                 .unwrap();
 
             let signed_data = SignedData::parse_ber(&cms).unwrap();
@@ -617,8 +612,8 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn simple_ed25519_signature() {
+    #[test]
+    fn simple_ed25519_signature() {
         let (cert, key) = self_signed_ed25519_key_pair();
 
         let cms = SignedDataBuilder::default()
@@ -626,7 +621,6 @@ mod tests {
             .certificate(cert.clone())
             .signer(SignerBuilder::new(&key, cert))
             .build_der()
-            .await
             .unwrap();
 
         let signed_data = SignedData::parse_ber(&cms).unwrap();

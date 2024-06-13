@@ -17,7 +17,7 @@ use {
         encode::Values,
         Integer, OctetString,
     },
-    reqwest::IntoUrl,
+    isahc::{http, RequestExt, ReadResponseExt},
     ring::rand::SecureRandom,
     std::{convert::Infallible, ops::Deref},
     x509_certificate::DigestAlgorithm,
@@ -30,9 +30,10 @@ pub const HTTP_CONTENT_TYPE_RESPONSE: &str = "application/timestamp-reply";
 #[derive(Debug)]
 pub enum TimeStampError {
     Io(std::io::Error),
-    Reqwest(reqwest::Error),
+    Isahc(isahc::Error),
+    Http(http::Error),
     Asn1Decode(DecodeError<Infallible>),
-    Http(&'static str),
+    Custom(&'static str),
     Random,
     NonceMismatch,
     Unsuccessful(TimeStampResp),
@@ -43,9 +44,10 @@ impl std::fmt::Display for TimeStampError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Io(e) => f.write_fmt(format_args!("I/O error: {}", e)),
-            Self::Reqwest(e) => f.write_fmt(format_args!("HTTP error: {}", e)),
+            Self::Isahc(e) => f.write_fmt(format_args!("HTTP client error: {}", e)),
+            Self::Http(e) => f.write_fmt(format_args!("HTTP error: {}", e)),
             Self::Asn1Decode(e) => f.write_fmt(format_args!("ASN.1 decode error: {}", e)),
-            Self::Http(msg) => f.write_str(msg),
+            Self::Custom(msg) => f.write_str(msg),
             Self::Random => f.write_str("error generating random nonce"),
             Self::NonceMismatch => f.write_str("nonce mismatch"),
             Self::Unsuccessful(r) => f.write_fmt(format_args!(
@@ -65,9 +67,15 @@ impl From<std::io::Error> for TimeStampError {
     }
 }
 
-impl From<reqwest::Error> for TimeStampError {
-    fn from(e: reqwest::Error) -> Self {
-        Self::Reqwest(e)
+impl From<isahc::Error> for TimeStampError {
+    fn from(e: isahc::Error) -> Self {
+        Self::Isahc(e)
+    }
+}
+
+impl From<http::Error> for TimeStampError {
+    fn from(e: http::Error) -> Self {
+        Self::Http(e)
     }
 }
 
@@ -153,30 +161,28 @@ impl From<TimeStampResp> for TimeStampResponse {
 }
 
 /// Send a [TimeStampReq] to a server via HTTP.
-pub async fn time_stamp_request_http(
-    url: impl IntoUrl,
+pub fn time_stamp_request_http(
+    url: &str,
     request: &TimeStampReq,
 ) -> Result<TimeStampResponse, TimeStampError> {
-    let client = reqwest::Client::new();
 
     let mut body = Vec::<u8>::new();
     request
         .encode_ref()
         .write_encoded(bcder::Mode::Der, &mut body)?;
 
-    let response = client
-        .post(url)
+    let mut response = isahc::Request::post(url)
         .header("Content-Type", HTTP_CONTENT_TYPE_REQUEST)
-        .body(body)
-        .send().await?;
+        .body(body)?
+        .send()?;
 
     if response.status().is_success()
         && response.headers().get("Content-Type")
-            == Some(&reqwest::header::HeaderValue::from_static(
+            == Some(&http::header::HeaderValue::from_static(
                 HTTP_CONTENT_TYPE_RESPONSE,
             ))
     {
-        let response_bytes = response.bytes().await?;
+        let response_bytes = response.bytes()?;
 
         let res = TimeStampResponse(Constructed::decode(
             response_bytes.as_ref(),
@@ -195,7 +201,7 @@ pub async fn time_stamp_request_http(
 
         Ok(res)
     } else {
-        Err(TimeStampError::Http("bad HTTP response"))
+        Err(TimeStampError::Custom("bad HTTP response"))
     }
 }
 
@@ -203,8 +209,8 @@ pub async fn time_stamp_request_http(
 ///
 /// This is a wrapper around [time_stamp_request_http] that constructs the low-level
 /// ASN.1 request object with reasonable defaults.
-pub async fn time_stamp_message_http(
-    url: impl IntoUrl,
+pub fn time_stamp_message_http(
+    url: &str,
     message: &[u8],
     digest_algorithm: DigestAlgorithm,
 ) -> Result<TimeStampResponse, TimeStampError> {
@@ -229,7 +235,7 @@ pub async fn time_stamp_message_http(
         extensions: None,
     };
 
-    time_stamp_request_http(url, &request).await
+    time_stamp_request_http(url, &request)
 }
 
 #[cfg(test)]
@@ -253,12 +259,12 @@ mod test {
         }
     }
 
-    #[tokio::test]
-    async fn simple_request() {
+    #[test]
+    fn simple_request() {
         let message = b"hello, world";
 
         let res = time_stamp_message_http(DIGICERT_TIMESTAMP_URL, message, DigestAlgorithm::Sha256)
-            .await.unwrap();
+            .unwrap();
 
         let signed_data = res.signed_data().unwrap().unwrap();
         assert_eq!(
