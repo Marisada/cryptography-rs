@@ -18,6 +18,8 @@ use {
     zeroize::Zeroizing,
 };
 
+type ZeroizingVec = Zeroizing<Vec<u8>>;
+
 /// Signifies that an entity is capable of producing cryptographic signatures.
 pub trait Sign {
     /// Create a cyrptographic signature over a message.
@@ -48,10 +50,10 @@ pub trait Sign {
     fn signature_algorithm(&self) -> Result<SignatureAlgorithm, Error>;
 
     /// Obtain the raw private key data.
-    fn private_key_data(&self) -> Option<Zeroizing<Vec<u8>>>;
+    fn private_key_data(&self) -> Option<ZeroizingVec>;
 
     /// Obtain RSA key primes p and q, if available.
-    fn rsa_primes(&self) -> Result<Option<(Zeroizing<Vec<u8>>, Zeroizing<Vec<u8>>)>, Error>;
+    fn rsa_primes(&self) -> Result<Option<(ZeroizingVec, ZeroizingVec)>, Error>;
 }
 
 /// A superset of [Signer] and [Sign].
@@ -102,7 +104,7 @@ pub struct EcdsaKeyPair {
     pkcs8_der: SecretDocument,
     ring_pair: ringsig::EcdsaKeyPair,
     curve: EcdsaCurve,
-    private_key: Zeroizing<Vec<u8>>,
+    private_key: ZeroizingVec,
 }
 
 /// An ED25519 key pair.
@@ -117,7 +119,7 @@ pub struct Ed25519KeyPair {
 pub struct RsaKeyPair {
     pkcs8_der: SecretDocument,
     ring_pair: ringsig::RsaKeyPair,
-    private_key: Zeroizing<Vec<u8>>,
+    private_key: ZeroizingVec,
 }
 
 /// Represents a key pair that exists in memory and can be used to create cryptographic signatures.
@@ -214,7 +216,7 @@ impl Sign for InMemorySigningKeyPair {
         })
     }
 
-    fn private_key_data(&self) -> Option<Zeroizing<Vec<u8>>> {
+    fn private_key_data(&self) -> Option<ZeroizingVec> {
         match self {
             Self::Rsa(kp) => Some(kp.private_key.clone()),
             Self::Ecdsa(kp) => Some(kp.private_key.clone()),
@@ -222,7 +224,7 @@ impl Sign for InMemorySigningKeyPair {
         }
     }
 
-    fn rsa_primes(&self) -> Result<Option<(Zeroizing<Vec<u8>>, Zeroizing<Vec<u8>>)>, Error> {
+    fn rsa_primes(&self) -> Result<Option<(ZeroizingVec, ZeroizingVec)>, Error> {
         match self {
             Self::Rsa(kp) => {
                 let key = Constructed::decode(kp.private_key.as_ref(), bcder::Mode::Der, |cons| {
@@ -334,7 +336,7 @@ impl InMemorySigningKeyPair {
     }
 
     /// Serialize this instance to a PKCS#8 [OneAsymmetricKey] ASN.1 structure.
-    pub fn to_pkcs8_one_asymmetric_key_der(&self) -> Zeroizing<Vec<u8>> {
+    pub fn to_pkcs8_one_asymmetric_key_der(&self) -> ZeroizingVec {
         match self {
             Self::Ecdsa(kp) => kp.pkcs8_der.to_bytes(),
             Self::Ed25519(kp) => kp.pkcs8_der.to_bytes(),

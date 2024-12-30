@@ -324,7 +324,7 @@ impl<R: BufRead> Read for CleartextSignatureReader<R> {
                         line.as_str()
                     };
 
-                    let no_eol = emit.trim_end_matches(|c| c == '\r' || c == '\n');
+                    let no_eol = emit.trim_end_matches(['\r', '\n']);
 
                     for hasher in self.hashers.values_mut() {
                         // On non-initial reads, feed in CRLF from last line, since we know this
