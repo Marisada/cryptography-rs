@@ -73,12 +73,12 @@ structures referenced by RFC5652 and taught them to serialize using `bcder`.
 
 pub mod asn1;
 
-#[cfg(any(feature = "reqwest", feature = "isahc"))]
+#[cfg(any(feature = "isahc", feature = "reqwest", feature = "ureq"))]
 mod signing;
-#[cfg(any(feature = "reqwest", feature = "isahc"))]
+#[cfg(any(feature = "isahc", feature = "reqwest", feature = "ureq"))]
 mod time_stamp_protocol;
 
-#[cfg(any(feature = "reqwest", feature = "isahc"))]
+#[cfg(any(feature = "isahc", feature = "reqwest", feature = "ureq"))]
 pub use {
     signing::{SignedDataBuilder, SignerBuilder},
     time_stamp_protocol::{
@@ -175,7 +175,7 @@ pub enum CmsError {
     /// Error occurred parsing a distinguished name field in a certificate.
     DistinguishedNameParseError,
 
-    #[cfg(any(feature = "reqwest", feature = "isahc"))]
+    #[cfg(any(feature = "isahc", feature = "reqwest", feature = "ureq"))]
     /// Error occurred in Time-Stamp Protocol.
     TimeStampProtocol(TimeStampError),
 
@@ -233,7 +233,7 @@ impl Display for CmsError {
             Self::DistinguishedNameParseError => {
                 f.write_str("could not parse distinguished name data")
             }
-            #[cfg(any(feature = "reqwest", feature = "isahc"))]
+            #[cfg(any(feature = "isahc", feature = "reqwest", feature = "ureq"))]
             Self::TimeStampProtocol(e) => {
                 f.write_fmt(format_args!("Time-Stamp Protocol error: {}", e))
             }
@@ -262,7 +262,7 @@ impl From<PemError> for CmsError {
     }
 }
 
-#[cfg(any(feature = "reqwest", feature = "isahc"))]
+#[cfg(any(feature = "isahc", feature = "reqwest", feature = "ureq"))]
 impl From<TimeStampError> for CmsError {
     fn from(e: TimeStampError) -> Self {
         Self::TimeStampProtocol(e)

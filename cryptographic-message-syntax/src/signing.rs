@@ -32,11 +32,14 @@ use {
     },
 };
 
+#[cfg(feature = "isahc")]
+use isahc::http;
+
 #[cfg(feature = "reqwest")]
 use reqwest::IntoUrl;
 
-#[cfg(feature = "isahc")]
-use isahc::http;
+#[cfg(feature = "ureq")]
+use ureq::http;
 
 /// Builder type to construct an entity that will sign some data.
 ///
@@ -71,9 +74,11 @@ pub struct SignerBuilder<'a> {
     extra_signed_attributes: Vec<Attribute>,
 
     /// Time-Stamp Protocol (TSP) server HTTP URL to use.
+    #[cfg(feature = "isahc")]
+    time_stamp_url: Option<http::Uri>,
     #[cfg(feature = "reqwest")]
     time_stamp_url: Option<reqwest::Url>,
-    #[cfg(feature = "isahc")]
+    #[cfg(feature = "ureq")]
     time_stamp_url: Option<http::Uri>,
 }
 
@@ -172,6 +177,23 @@ impl<'a> SignerBuilder<'a> {
     /// (TSP) as defined by RFC 3161. At signature generation time, the server will be
     /// contacted and the time stamp token response will be added as an unsigned attribute
     /// on the [SignedData] instance.
+    #[cfg(feature = "isahc")]
+    pub fn time_stamp_url<T>(mut self, url: T) -> Result<Self, TimeStampError>
+    where
+        http::Uri: TryFrom<T>,
+    {
+        let uri = http::Uri::try_from(url)
+            .map_err(|_| TimeStampError::Http(String::from("Invalid Uri")))?;
+        self.time_stamp_url = Some(uri);
+        Ok(self)
+    }
+
+    /// Obtain a time-stamp token from a server.
+    ///
+    /// If this is called, the URL must be a server implementing the Time-Stamp Protocol
+    /// (TSP) as defined by RFC 3161. At signature generation time, the server will be
+    /// contacted and the time stamp token response will be added as an unsigned attribute
+    /// on the [SignedData] instance.
     #[cfg(feature = "reqwest")]
     pub fn time_stamp_url(mut self, url: impl IntoUrl) -> Result<Self, TimeStampError> {
         self.time_stamp_url = Some(url.into_url()?);
@@ -184,7 +206,7 @@ impl<'a> SignerBuilder<'a> {
     /// (TSP) as defined by RFC 3161. At signature generation time, the server will be
     /// contacted and the time stamp token response will be added as an unsigned attribute
     /// on the [SignedData] instance.
-    #[cfg(feature = "isahc")]
+    #[cfg(feature = "ureq")]
     pub fn time_stamp_url<T>(mut self, url: T) -> Result<Self, TimeStampError>
     where
         http::Uri: TryFrom<T>,

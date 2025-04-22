@@ -22,11 +22,14 @@ use {
     x509_certificate::DigestAlgorithm,
 };
 
+#[cfg(feature = "isahc")]
+use isahc::{http, ReadResponseExt, RequestExt};
+
 #[cfg(feature = "reqwest")]
 use reqwest::IntoUrl;
 
-#[cfg(feature = "isahc")]
-use isahc::{http, ReadResponseExt, RequestExt};
+#[cfg(feature = "ureq")]
+use ureq::http;
 
 pub const HTTP_CONTENT_TYPE_REQUEST: &str = "application/timestamp-query";
 
@@ -35,10 +38,12 @@ pub const HTTP_CONTENT_TYPE_RESPONSE: &str = "application/timestamp-reply";
 #[derive(Debug)]
 pub enum TimeStampError {
     Io(std::io::Error),
-    #[cfg(feature = "reqwest")]
-    Reqwest(reqwest::Error),
     #[cfg(feature = "isahc")]
     Isahc(isahc::Error),
+    #[cfg(feature = "reqwest")]
+    Reqwest(reqwest::Error),
+    #[cfg(feature = "ureq")]
+    Ureq(ureq::Error),
     Asn1Decode(DecodeError<Infallible>),
     Http(String),
     Random,
@@ -51,10 +56,12 @@ impl std::fmt::Display for TimeStampError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Io(e) => f.write_fmt(format_args!("I/O error: {}", e)),
-            #[cfg(feature = "reqwest")]
-            Self::Reqwest(e) => f.write_fmt(format_args!("HTTP error: {}", e)),
             #[cfg(feature = "isahc")]
             Self::Isahc(e) => f.write_fmt(format_args!("HTTP client error: {}", e)),
+            #[cfg(feature = "reqwest")]
+            Self::Reqwest(e) => f.write_fmt(format_args!("HTTP error: {}", e)),
+            #[cfg(feature = "ureq")]
+            Self::Ureq(e) => f.write_fmt(format_args!("HTTP client error: {}", e)),
             Self::Asn1Decode(e) => f.write_fmt(format_args!("ASN.1 decode error: {}", e)),
             Self::Http(msg) => f.write_str(msg),
             Self::Random => f.write_str("error generating random nonce"),
@@ -76,13 +83,6 @@ impl From<std::io::Error> for TimeStampError {
     }
 }
 
-#[cfg(feature = "reqwest")]
-impl From<reqwest::Error> for TimeStampError {
-    fn from(e: reqwest::Error) -> Self {
-        Self::Reqwest(e)
-    }
-}
-
 #[cfg(feature = "isahc")]
 impl From<isahc::Error> for TimeStampError {
     fn from(e: isahc::Error) -> Self {
@@ -91,6 +91,27 @@ impl From<isahc::Error> for TimeStampError {
 }
 
 #[cfg(feature = "isahc")]
+impl From<http::Error> for TimeStampError {
+    fn from(e: http::Error) -> Self {
+        Self::Http(e.to_string())
+    }
+}
+
+#[cfg(feature = "reqwest")]
+impl From<reqwest::Error> for TimeStampError {
+    fn from(e: reqwest::Error) -> Self {
+        Self::Reqwest(e)
+    }
+}
+
+#[cfg(feature = "ureq")]
+impl From<ureq::Error> for TimeStampError {
+    fn from(e: ureq::Error) -> Self {
+        Self::Ureq(e)
+    }
+}
+
+#[cfg(feature = "ureq")]
 impl From<http::Error> for TimeStampError {
     fn from(e: http::Error) -> Self {
         Self::Http(e.to_string())
@@ -178,52 +199,54 @@ impl From<TimeStampResp> for TimeStampResponse {
     }
 }
 
-/// Send a [TimeStampReq] to a server via HTTP.
+/// Send a Time-Stamp request for a given message to an HTTP URL.
+///
+/// This is a wrapper around [time_stamp_request_http] that constructs the low-level
+/// ASN.1 request object with reasonable defaults.
+#[cfg(feature = "isahc")]
+pub fn time_stamp_message_http<T>(
+    url: T,
+    message: &[u8],
+    digest_algorithm: DigestAlgorithm,
+) -> Result<TimeStampResponse, TimeStampError>
+where
+    http::Uri: TryFrom<T>,
+    <http::Uri as TryFrom<T>>::Error: Into<http::Error>,
+{
+    let request = create_request(message, digest_algorithm)?;
+    time_stamp_request_http(url, &request)
+}
+
+/// Send a Time-Stamp request for a given message to an HTTP URL.
+///
+/// This is a wrapper around [time_stamp_request_http] that constructs the low-level
+/// ASN.1 request object with reasonable defaults.
 #[cfg(feature = "reqwest")]
-pub fn time_stamp_request_http(
+pub fn time_stamp_message_http(
     url: impl IntoUrl,
-    request: &TimeStampReq,
+    message: &[u8],
+    digest_algorithm: DigestAlgorithm,
 ) -> Result<TimeStampResponse, TimeStampError> {
-    let client = reqwest::blocking::Client::new();
+    let request = create_request(message, digest_algorithm)?;
+    time_stamp_request_http(url, &request)
+}
 
-    let mut body = Vec::<u8>::new();
-    request
-        .encode_ref()
-        .write_encoded(bcder::Mode::Der, &mut body)?;
-
-    let response = client
-        .post(url)
-        .header("Content-Type", HTTP_CONTENT_TYPE_REQUEST)
-        .body(body)
-        .send()?;
-
-    if response.status().is_success()
-        && response.headers().get("Content-Type")
-            == Some(&reqwest::header::HeaderValue::from_static(
-                HTTP_CONTENT_TYPE_RESPONSE,
-            ))
-    {
-        let response_bytes = response.bytes()?;
-
-        let res = TimeStampResponse(Constructed::decode(
-            response_bytes.as_ref(),
-            bcder::Mode::Der,
-            TimeStampResp::take_from,
-        )?);
-
-        // Verify nonce was reflected, if present.
-        if res.is_success() {
-            if let Some(tst_info) = res.tst_info()? {
-                if tst_info.nonce != request.nonce {
-                    return Err(TimeStampError::NonceMismatch);
-                }
-            }
-        }
-
-        Ok(res)
-    } else {
-        Err(TimeStampError::Http(String::from("bad HTTP response")))
-    }
+/// Send a Time-Stamp request for a given message to an HTTP URL.
+///
+/// This is a wrapper around [time_stamp_request_http] that constructs the low-level
+/// ASN.1 request object with reasonable defaults.
+#[cfg(feature = "ureq")]
+pub fn time_stamp_message_http<T>(
+    url: T,
+    message: &[u8],
+    digest_algorithm: DigestAlgorithm,
+) -> Result<TimeStampResponse, TimeStampError>
+where
+    http::Uri: TryFrom<T>,
+    <http::Uri as TryFrom<T>>::Error: Into<http::Error>,
+{
+    let request = create_request(message, digest_algorithm)?;
+    time_stamp_request_http(url, &request)
 }
 
 /// Send a [TimeStampReq] to a server via HTTP.
@@ -275,36 +298,101 @@ where
     }
 }
 
-/// Send a Time-Stamp request for a given message to an HTTP URL.
-///
-/// This is a wrapper around [time_stamp_request_http] that constructs the low-level
-/// ASN.1 request object with reasonable defaults.
+/// Send a [TimeStampReq] to a server via HTTP.
 #[cfg(feature = "reqwest")]
-pub fn time_stamp_message_http(
+pub fn time_stamp_request_http(
     url: impl IntoUrl,
-    message: &[u8],
-    digest_algorithm: DigestAlgorithm,
+    request: &TimeStampReq,
 ) -> Result<TimeStampResponse, TimeStampError> {
-    let request = create_request(message, digest_algorithm)?;
-    time_stamp_request_http(url, &request)
+    let client = reqwest::blocking::Client::new();
+
+    let mut body = Vec::<u8>::new();
+    request
+        .encode_ref()
+        .write_encoded(bcder::Mode::Der, &mut body)?;
+
+    let response = client
+        .post(url)
+        .header("Content-Type", HTTP_CONTENT_TYPE_REQUEST)
+        .body(body)
+        .send()?;
+
+    if response.status().is_success()
+        && response.headers().get("Content-Type")
+            == Some(&reqwest::header::HeaderValue::from_static(
+                HTTP_CONTENT_TYPE_RESPONSE,
+            ))
+    {
+        let response_bytes = response.bytes()?;
+
+        let res = TimeStampResponse(Constructed::decode(
+            response_bytes.as_ref(),
+            bcder::Mode::Der,
+            TimeStampResp::take_from,
+        )?);
+
+        // Verify nonce was reflected, if present.
+        if res.is_success() {
+            if let Some(tst_info) = res.tst_info()? {
+                if tst_info.nonce != request.nonce {
+                    return Err(TimeStampError::NonceMismatch);
+                }
+            }
+        }
+
+        Ok(res)
+    } else {
+        Err(TimeStampError::Http(String::from("bad HTTP response")))
+    }
 }
 
-/// Send a Time-Stamp request for a given message to an HTTP URL.
-///
-/// This is a wrapper around [time_stamp_request_http] that constructs the low-level
-/// ASN.1 request object with reasonable defaults.
-#[cfg(feature = "isahc")]
-pub fn time_stamp_message_http<T>(
+/// Send a [TimeStampReq] to a server via HTTP.
+#[cfg(feature = "ureq")]
+pub fn time_stamp_request_http<T>(
     url: T,
-    message: &[u8],
-    digest_algorithm: DigestAlgorithm,
+    request: &TimeStampReq,
 ) -> Result<TimeStampResponse, TimeStampError>
 where
     http::Uri: TryFrom<T>,
     <http::Uri as TryFrom<T>>::Error: Into<http::Error>,
 {
-    let request = create_request(message, digest_algorithm)?;
-    time_stamp_request_http(url, &request)
+    let mut body = Vec::<u8>::new();
+    request
+        .encode_ref()
+        .write_encoded(bcder::Mode::Der, &mut body)?;
+
+    let req = http::Request::post(url)
+        .header("Content-Type", HTTP_CONTENT_TYPE_REQUEST)
+        .body(body)?;
+    let mut response = ureq::run(req)?;
+
+    if response.status().is_success()
+        && response.headers().get("Content-Type")
+            == Some(&http::header::HeaderValue::from_static(
+                HTTP_CONTENT_TYPE_RESPONSE,
+            ))
+    {
+        let response_bytes = response.body_mut().read_to_vec()?;
+
+        let res = TimeStampResponse(Constructed::decode(
+            response_bytes.as_ref(),
+            bcder::Mode::Der,
+            TimeStampResp::take_from,
+        )?);
+
+        // Verify nonce was reflected, if present.
+        if res.is_success() {
+            if let Some(tst_info) = res.tst_info()? {
+                if tst_info.nonce != request.nonce {
+                    return Err(TimeStampError::NonceMismatch);
+                }
+            }
+        }
+
+        Ok(res)
+    } else {
+        Err(TimeStampError::Http(String::from("bad HTTP response")))
+    }
 }
 
 fn create_request(
