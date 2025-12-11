@@ -1,14 +1,8 @@
 on:
   push:
-    branches-ignore:
-      - 'ci-test'
-      - 'dependabot/**'
-    tags-ignore:
-      - '**'
+    branches: [ "main" ]
   pull_request:
-  schedule:
-    - cron: '13 15 * * *'
-  workflow_dispatch:
+    branches: [ "**" ]
 jobs:
   build-and-test:
     strategy:
