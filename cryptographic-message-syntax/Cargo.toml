@@ -20,6 +20,7 @@ pem = "3.0.6"
 reqwest = { version = "0.13.1", default-features = false, features = ["blocking", "rustls"], optional = true }
 ring = "0.17.14"
 signature = { version = "2.2.0", features = ["std"] }
+ureq = { version = "3", optional = true }
 
 [dependencies.x509-certificate]
 path = "../x509-certificate"
@@ -27,5 +28,6 @@ version = "0.25.0"
 features = ["test"]
 
 [features]
-default = ["http"]
-http = ["dep:reqwest"]
+default = ["ureq"]
+reqwest = ["dep:reqwest"]
+ureq = ["dep:ureq"]

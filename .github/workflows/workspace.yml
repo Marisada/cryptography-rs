@@ -1,8 +1,6 @@
 on:
   push:
   pull_request:
-  schedule:
-    - cron: '13 15 * * *'
 permissions: { }
 jobs:
   build-and-test:
@@ -52,4 +50,5 @@ jobs:
       - name: Run Clippy
         if: ${{ matrix.rust_toolchain == 'stable' || matrix.rust_toolchain == 'beta' }}
         run: |
-          cargo clippy --workspace --all-targets --all-features
+          cargo clippy --workspace --all-targets
+          cargo clippy --workspace --all-targets --no-default-features --features reqwest

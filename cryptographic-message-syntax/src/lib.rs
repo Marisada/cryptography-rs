@@ -71,14 +71,17 @@ seem to be compatible with BER. So we've recursively defined ASN.1 data
 structures referenced by RFC5652 and taught them to serialize using `bcder`.
 */
 
+#[cfg(all(feature = "reqwest", feature = "ureq"))]
+compile_error!("feature \"reqwest\" and feature \"ureq\" cannot be enabled at the same time");
+
 pub mod asn1;
 
-#[cfg(feature = "http")]
+#[cfg(any(feature = "reqwest", feature = "ureq"))]
 mod signing;
-#[cfg(feature = "http")]
+#[cfg(any(feature = "reqwest", feature = "ureq"))]
 mod time_stamp_protocol;
 
-#[cfg(feature = "http")]
+#[cfg(any(feature = "reqwest", feature = "ureq"))]
 pub use {
     signing::{SignedDataBuilder, SignerBuilder},
     time_stamp_protocol::{
@@ -175,7 +178,7 @@ pub enum CmsError {
     /// Error occurred parsing a distinguished name field in a certificate.
     DistinguishedNameParseError,
 
-    #[cfg(feature = "http")]
+    #[cfg(any(feature = "reqwest", feature = "ureq"))]
     /// Error occurred in Time-Stamp Protocol.
     TimeStampProtocol(TimeStampError),
 
@@ -233,7 +236,7 @@ impl Display for CmsError {
             Self::DistinguishedNameParseError => {
                 f.write_str("could not parse distinguished name data")
             }
-            #[cfg(feature = "http")]
+            #[cfg(any(feature = "reqwest", feature = "ureq"))]
             Self::TimeStampProtocol(e) => {
                 f.write_fmt(format_args!("Time-Stamp Protocol error: {}", e))
             }
@@ -262,7 +265,7 @@ impl From<PemError> for CmsError {
     }
 }
 
-#[cfg(feature = "http")]
+#[cfg(any(feature = "reqwest", feature = "ureq"))]
 impl From<TimeStampError> for CmsError {
     fn from(e: TimeStampError) -> Self {
         Self::TimeStampProtocol(e)
